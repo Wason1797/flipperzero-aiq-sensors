@@ -14,6 +14,7 @@
 // Drivers
 #include "sensors/scd4x/scd4x_i2c.h"
 #include "sensors/scd4x/sensirion_i2c_hal.h"
+#include "sensors/ens160/ens160_i2c.h"
 
 typedef enum {
     AiqSensorsAppScene_MainMenu,
@@ -124,9 +125,9 @@ void aiq_sensors_app_ens160_view(Canvas* canvas, AiqSensorsAppModel* model) {
     canvas_draw_icon(canvas, 2, 42, &I_weather_wind_15x16);
     canvas_draw_icon(canvas, 58, 20, &I_plant_16x16);
 
-    furi_string_printf(xstr, "%d", model->aiq_index);
+    furi_string_printf(xstr, "aiq: %d", model->aiq_index);
     canvas_draw_str(canvas, 22, 31, furi_string_get_cstr(xstr));
-    furi_string_printf(xstr, "%u", model->tvoc);
+    furi_string_printf(xstr, "%u ppb", model->tvoc);
     canvas_draw_str(canvas, 22, 57, furi_string_get_cstr(xstr));
     furi_string_printf(xstr, "%u ppm", model->eco2);
     canvas_draw_str(canvas, 76, 33, furi_string_get_cstr(xstr));
@@ -242,8 +243,33 @@ void aiq_sensors_app_init_scd4x_view(AiqSensorsApp* app) {
 }
 
 void aiq_sensors_app_init_ens160_view(AiqSensorsApp* app) {
-    UNUSED(app);
-    // TODO
+    furi_mutex_acquire(app->mutex, FuriWaitForever);
+    if(ens160_i2c_hal_init()) {
+        uint8_t error = ens160_init();
+        with_view_model(
+            app->view,
+            AiqSensorsAppModel * model,
+            {
+                model->error = error;
+                model->eco2 = 0;
+                model->tvoc = 0;
+                model->aiq_index = 0;
+            },
+            false);
+    } else {
+        with_view_model(
+            app->view,
+            AiqSensorsAppModel * model,
+            {
+                model->error = -4;
+                model->eco2 = 0;
+                model->tvoc = 0;
+                model->aiq_index = 0;
+            },
+            false);
+    }
+    ens160_i2c_hal_free();
+    furi_mutex_release(app->mutex);
 }
 
 void aiq_sensors_app_enter_sensor_data_scene(void* context) {
@@ -300,8 +326,27 @@ void aiq_sensors_app_update_scd4x_view(AiqSensorsApp* app) {
 }
 
 void aiq_sensors_app_update_ens160_view(AiqSensorsApp* app) {
-    UNUSED(app);
-    // TODO
+    uint16_t eco2 = 0;
+    uint16_t tvoc = 0;
+    uint8_t aiq_index = 0;
+    uint8_t error = 0;
+
+    furi_mutex_acquire(app->mutex, FuriWaitForever);
+    ens160_i2c_hal_init();
+    error = ens160_read_measurement(&aiq_index, &eco2, &tvoc);
+    bool redraw = true;
+    with_view_model(
+        app->view,
+        AiqSensorsAppModel * model,
+        {
+            model->eco2 = eco2;
+            model->tvoc = tvoc;
+            model->aiq_index = aiq_index;
+            model->error = error;
+        },
+        redraw);
+    ens160_i2c_hal_free();
+    furi_mutex_release(app->mutex);
 }
 
 bool aiq_sensors_app_on_sensor_data_scene_event(void* context, SceneManagerEvent event) {
